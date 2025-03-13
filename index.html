@@ -315,89 +315,69 @@
 
         // カメラの起動
         startCameraButton.addEventListener('click', async () => {
+            // OpenCVが読み込まれていない場合は、ページをリロード
+            if (!cvLoaded) {
+                location.reload();
+                return;
+            }
+            
             if (!checkUserMediaSupport()) {
                 alert('お使いのブラウザはカメラをサポートしていません。');
                 return;
             }
             
-            // iOSでのカメラアクセス問題に対処
-            if (navigator.userAgent.match(/iPhone|iPad|iPod/i)) {
-                // iOS Safariでは、getUserMediaはユーザーのインタラクションから直接呼び出す必要がある
-                // 簡易的なUIを表示
-                const permissionUI = document.createElement('div');
-                permissionUI.style.position = 'fixed';
-                permissionUI.style.top = '0';
-                permissionUI.style.left = '0';
-                permissionUI.style.width = '100%';
-                permissionUI.style.height = '100%';
-                permissionUI.style.backgroundColor = 'rgba(0,0,0,0.8)';
-                permissionUI.style.display = 'flex';
-                permissionUI.style.flexDirection = 'column';
-                permissionUI.style.justifyContent = 'center';
-                permissionUI.style.alignItems = 'center';
-                permissionUI.style.zIndex = '1000';
-                
-                const infoText = document.createElement('p');
-                infoText.textContent = 'カメラへのアクセスを許可してください';
-                infoText.style.color = 'white';
-                infoText.style.marginBottom = '20px';
-                infoText.style.textAlign = 'center';
-                infoText.style.padding = '0 20px';
-                
-                const permissionButton = document.createElement('button');
-                permissionButton.textContent = 'カメラを許可する';
-                permissionButton.style.padding = '12px 24px';
-                permissionButton.style.backgroundColor = '#007aff';
-                permissionButton.style.color = 'white';
-                permissionButton.style.border = 'none';
-                permissionButton.style.borderRadius = '8px';
-                permissionButton.style.fontSize = '16px';
-                
-                permissionUI.appendChild(infoText);
-                permissionUI.appendChild(permissionButton);
-                document.body.appendChild(permissionUI);
-                
-                permissionButton.onclick = async () => {
-                    try {
-                        document.body.removeChild(permissionUI);
-                        await startCameraWithPermission();
-                    } catch (err) {
-                        console.error('カメラの起動に失敗しました:', err);
-                        alert('カメラへのアクセスが拒否されました。設定でカメラへのアクセスを許可してください。');
+            try {
+                // iOSのSafariとその他のブラウザでの共通のアプローチ
+                const constraints = {
+                    video: {
+                        facingMode: 'environment', // 背面カメラを優先
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
                     }
                 };
-            } else {
-                // iOS以外のデバイスでは通常の方法でカメラを起動
-                try {
-                    await startCameraWithPermission();
-                } catch (err) {
-                    console.error('カメラの起動に失敗しました:', err);
-                    alert('カメラへのアクセスが拒否されました。設定でカメラへのアクセスを許可してください。');
+                
+                // カメラへのアクセスを要求
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
+                video.srcObject = stream;
+                
+                // ビデオの準備ができたらボタンを有効化
+                video.onloadedmetadata = () => {
+                    startCameraButton.disabled = true;
+                    takePhotoButton.disabled = false;
+                    video.style.display = 'block';
+                    photo.style.display = 'none';
+                };
+                
+            } catch (err) {
+                console.error('カメラの起動に失敗しました:', err);
+                
+                // エラーメッセージをより詳細に
+                if (err.name === 'NotAllowedError') {
+                    alert('カメラへのアクセスが拒否されました。ブラウザの設定からカメラアクセスを許可してください。');
+                } else if (err.name === 'NotFoundError') {
+                    alert('カメラが見つかりませんでした。デバイスにカメラが接続されているか確認してください。');
+                } else if (err.name === 'NotReadableError') {
+                    alert('カメラにアクセスできませんでした。他のアプリがカメラを使用している可能性があります。');
+                } else if (err.name === 'OverconstrainedError') {
+                    alert('指定されたカメラ設定が利用できません。別の設定で再試行します。');
+                    // フォールバック: 制約を緩和して再試行
+                    try {
+                        stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                        video.srcObject = stream;
+                        video.onloadedmetadata = () => {
+                            startCameraButton.disabled = true;
+                            takePhotoButton.disabled = false;
+                            video.style.display = 'block';
+                            photo.style.display = 'none';
+                        };
+                    } catch (fallbackErr) {
+                        alert('カメラアクセスに失敗しました。ブラウザを再起動するか、別のデバイスをお試しください。');
+                    }
+                } else {
+                    alert('カメラの起動中にエラーが発生しました: ' + err.message);
                 }
             }
         });
-        
-        // カメラ起動の実際の処理
-        async function startCameraWithPermission() {
-            const constraints = {
-                video: {
-                    facingMode: 'environment', // 背面カメラを優先
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 }
-                }
-            };
-            
-            stream = await navigator.mediaDevices.getUserMedia(constraints);
-            video.srcObject = stream;
-            
-            // ビデオの準備ができたらボタンを有効化
-            video.onloadedmetadata = () => {
-                startCameraButton.disabled = true;
-                takePhotoButton.disabled = false;
-                video.style.display = 'block';
-                photo.style.display = 'none';
-            };
-        }
 
         // 写真の撮影
         takePhotoButton.addEventListener('click', () => {
@@ -463,6 +443,80 @@
             } else {
                 startCameraButton.disabled = false;
             }
+        });
+        
+        // トラブルシューティングボタン
+        document.getElementById('debug').addEventListener('click', () => {
+            const debugInfo = {
+                browser: navigator.userAgent,
+                opencv: typeof cv !== 'undefined' ? 'ロード済み' : '未ロード',
+                camera: checkUserMediaSupport() ? 'サポート' : '未サポート',
+                screen: {
+                    width: window.innerWidth,
+                    height: window.innerHeight
+                },
+                secure: window.location.protocol === 'https:' ? 'はい' : 'いいえ'
+            };
+            
+            const debugModal = document.createElement('div');
+            debugModal.style.position = 'fixed';
+            debugModal.style.top = '0';
+            debugModal.style.left = '0';
+            debugModal.style.width = '100%';
+            debugModal.style.height = '100%';
+            debugModal.style.backgroundColor = 'rgba(0,0,0,0.9)';
+            debugModal.style.zIndex = '1100';
+            debugModal.style.display = 'flex';
+            debugModal.style.flexDirection = 'column';
+            debugModal.style.padding = '20px';
+            debugModal.style.boxSizing = 'border-box';
+            debugModal.style.overflowY = 'auto';
+            
+            const closeButton = document.createElement('button');
+            closeButton.textContent = '閉じる';
+            closeButton.style.alignSelf = 'flex-end';
+            closeButton.style.padding = '8px 16px';
+            closeButton.style.backgroundColor = '#dc3545';
+            closeButton.style.color = 'white';
+            closeButton.style.border = 'none';
+            closeButton.style.borderRadius = '4px';
+            closeButton.style.marginBottom = '20px';
+            
+            const infoContainer = document.createElement('div');
+            infoContainer.style.color = 'white';
+            infoContainer.style.backgroundColor = '#333';
+            infoContainer.style.padding = '15px';
+            infoContainer.style.borderRadius = '8px';
+            infoContainer.style.fontSize = '14px';
+            infoContainer.style.fontFamily = 'monospace';
+            infoContainer.style.whiteSpace = 'pre-wrap';
+            infoContainer.style.overflow = 'auto';
+            
+            const debugText = `===== デバッグ情報 =====
+ブラウザ: ${debugInfo.browser}
+OpenCV: ${debugInfo.opencv}
+カメラサポート: ${debugInfo.camera}
+画面サイズ: ${debugInfo.screen.width}x${debugInfo.screen.height}
+セキュア接続: ${debugInfo.secure}
+
+===== トラブルシューティング =====
+1. ブラウザーの設定でカメラとJavaScriptが許可されていることを確認してください
+2. 別のブラウザ（Chrome、Firefoxなど）で試してみてください
+3. デバイスを再起動してみてください
+4. 静的な画像を使用したい場合は、写真を撮影せずに「錠剤を数える」ボタンを押してみてください
+
+===== カメラがアクセスできない場合 =====
+iOSの設定 > Safari > カメラ で「許可」に設定されていることを確認してください
+`;
+            infoContainer.textContent = debugText;
+            
+            closeButton.addEventListener('click', () => {
+                document.body.removeChild(debugModal);
+            });
+            
+            debugModal.appendChild(closeButton);
+            debugModal.appendChild(infoContainer);
+            document.body.appendChild(debugModal);
         });
         
         // OpenCVを使った錠剤のカウント処理
