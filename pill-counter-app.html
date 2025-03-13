@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src * 'self' 'unsafe-inline' 'unsafe-eval' data: blob: filesystem:">
+    <title>錠剤カウンターアプリ</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/opencv.js/4.7.0/opencv.js" integrity="sha512-RJGgr8UKvK/QZ2cJOQoN3l0vUKWmL+9vaTw3OiEUBpKTJwQgWQ0aKGVhNFXTP3vKRV4ZG2UJbqnLLbvxcGvMYg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f7;
+            color: #333;
+        }
+        .container {
+            max-width: 100%;
+            padding: 20px;
+            margin: 0 auto;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 20px;
+        }
+        .camera-container {
+            position: relative;
+            width: 100%;
+            max-width: 500px;
+            margin: 0 auto 20px;
+            overflow: hidden;
+            border-radius: 10px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+        }
+        #video {
+            display: block;
+            width: 100%;
+            background-color: #000;
+        }
+        #canvas {
+            display: none;
+        }
+        #photo {
+            display: none;
+            width: 100%;
+            border-radius: 10px;
+        }
+        .controls {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            width: 100%;
+            max-width: 500px;
+            margin: 0 auto;
+        }
+        button {
+            padding: 12px 0;
+            border: none;
+            border-radius: 8px;
+            background-color: #007aff;
+            color: white;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #0062cc;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        #countResult {
+            text-align: center;
+            font-size: 18px;
+            font-weight: 600;
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+        #processingOverlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0, 0, 0, 0.7);
+            z-index: 100;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+        }
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 4px solid white;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 10px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .processing-text {
+            color: white;
+            font-size: 18px;
+        }
+        .debug-image {
+            width: 100%;
+            max-width: 500px;
+            margin: 10px auto;
+            display: none;
+            border-radius: 8px;
+        }
+        .threshold-container {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 20px;
+            width: 100%;
+            max-width: 500px;
+            margin: 20px auto;
+        }
+        .slider-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        label {
+            font-weight: 600;
+            flex: 1;
+        }
+        input[type="range"] {
+            flex: 2;
+        }
+        .value-display {
+            width: 40px;
+            text-align: right;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>錠剤カウンターアプリ</h1>
+        
+        <div class="camera-container">
+            <video id="video" autoplay playsinline></video>
+            <canvas id="canvas"></canvas>
+            <img id="photo" alt="撮影した写真">
+        </div>
+        
+        <div class="threshold-container">
+            <div class="slider-container">
+                <label for="thresholdValue">しきい値:</label>
+                <input type="range" id="thresholdValue" min="0" max="255" value="127">
+                <span id="thresholdDisplay" class="value-display">127</span>
+            </div>
+            <div class="slider-container">
+                <label for="minArea">最小サイズ:</label>
+                <input type="range" id="minArea" min="10" max="2000" value="100">
+                <span id="minAreaDisplay" class="value-display">100</span>
+            </div>
+            <div class="slider-container">
+                <label for="maxArea">最大サイズ:</label>
+                <input type="range" id="maxArea" min="100" max="10000" value="5000">
+                <span id="maxAreaDisplay" class="value-display">5000</span>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <button id="startCamera">カメラを起動</button>
+            <button id="takePhoto" disabled>写真を撮影</button>
+            <button id="countPills" disabled>錠剤を数える</button>
+            <button id="retake" disabled>やり直し</button>
+        </div>
+        
+        <div id="countResult">錠剤の数: -</div>
+        
+        <img id="debugImage" class="debug-image" alt="処理後の画像">
+    </div>
+
+    <div id="processingOverlay" style="display: none;">
+        <div class="spinner"></div>
+        <div class="processing-text">処理中...</div>
+    </div>
+
+    <script>
+        // OpenCVが読み込まれるのを待つ
+        function onOpenCvReady() {
+            console.log('OpenCV.js is ready');
+            document.getElementById('startCamera').disabled = false;
+        }
+        
+        // SafariでUserMediaをチェック
+        function checkUserMediaSupport() {
+            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                return true;
+            } else if (navigator.getUserMedia) {
+                return true;
+            } else {
+                return false;
+            }
+        }
+
+        // OpenCVの読み込みを監視
+        if (typeof cv !== 'undefined') {
+            onOpenCvReady();
+        } else {
+            document.addEventListener('opencv4javascriptready', onOpenCvReady);
+        }
+
+        // DOM要素
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const photo = document.getElementById('photo');
+        const startCameraButton = document.getElementById('startCamera');
+        const takePhotoButton = document.getElementById('takePhoto');
+        const countPillsButton = document.getElementById('countPills');
+        const retakeButton = document.getElementById('retake');
+        const countResult = document.getElementById('countResult');
+        const processingOverlay = document.getElementById('processingOverlay');
+        const debugImage = document.getElementById('debugImage');
+        
+        // スライダー要素
+        const thresholdSlider = document.getElementById('thresholdValue');
+        const minAreaSlider = document.getElementById('minArea');
+        const maxAreaSlider = document.getElementById('maxArea');
+        const thresholdDisplay = document.getElementById('thresholdDisplay');
+        const minAreaDisplay = document.getElementById('minAreaDisplay');
+        const maxAreaDisplay = document.getElementById('maxAreaDisplay');
+        
+        // ストリームの保存用
+        let stream = null;
+        
+        // スライダーの値表示を更新
+        thresholdSlider.addEventListener('input', () => {
+            thresholdDisplay.textContent = thresholdSlider.value;
+        });
+        
+        minAreaSlider.addEventListener('input', () => {
+            minAreaDisplay.textContent = minAreaSlider.value;
+        });
+        
+        maxAreaSlider.addEventListener('input', () => {
+            maxAreaDisplay.textContent = maxAreaSlider.value;
+        });
+
+        // カメラの起動
+        startCameraButton.addEventListener('click', async () => {
+            if (!checkUserMediaSupport()) {
+                alert('お使いのブラウザはカメラをサポートしていません。');
+                return;
+            }
+            
+            // iOSでのカメラアクセス問題に対処
+            if (navigator.userAgent.match(/iPhone|iPad|iPod/i)) {
+                // iOS Safariでは、getUserMediaはユーザーのインタラクションから直接呼び出す必要がある
+                // 簡易的なUIを表示
+                const permissionUI = document.createElement('div');
+                permissionUI.style.position = 'fixed';
+                permissionUI.style.top = '0';
+                permissionUI.style.left = '0';
+                permissionUI.style.width = '100%';
+                permissionUI.style.height = '100%';
+                permissionUI.style.backgroundColor = 'rgba(0,0,0,0.8)';
+                permissionUI.style.display = 'flex';
+                permissionUI.style.flexDirection = 'column';
+                permissionUI.style.justifyContent = 'center';
+                permissionUI.style.alignItems = 'center';
+                permissionUI.style.zIndex = '1000';
+                
+                const infoText = document.createElement('p');
+                infoText.textContent = 'カメラへのアクセスを許可してください';
+                infoText.style.color = 'white';
+                infoText.style.marginBottom = '20px';
+                infoText.style.textAlign = 'center';
+                infoText.style.padding = '0 20px';
+                
+                const permissionButton = document.createElement('button');
+                permissionButton.textContent = 'カメラを許可する';
+                permissionButton.style.padding = '12px 24px';
+                permissionButton.style.backgroundColor = '#007aff';
+                permissionButton.style.color = 'white';
+                permissionButton.style.border = 'none';
+                permissionButton.style.borderRadius = '8px';
+                permissionButton.style.fontSize = '16px';
+                
+                permissionUI.appendChild(infoText);
+                permissionUI.appendChild(permissionButton);
+                document.body.appendChild(permissionUI);
+                
+                permissionButton.onclick = async () => {
+                    try {
+                        document.body.removeChild(permissionUI);
+                        await startCameraWithPermission();
+                    } catch (err) {
+                        console.error('カメラの起動に失敗しました:', err);
+                        alert('カメラへのアクセスが拒否されました。設定でカメラへのアクセスを許可してください。');
+                    }
+                };
+            } else {
+                // iOS以外のデバイスでは通常の方法でカメラを起動
+                try {
+                    await startCameraWithPermission();
+                } catch (err) {
+                    console.error('カメラの起動に失敗しました:', err);
+                    alert('カメラへのアクセスが拒否されました。設定でカメラへのアクセスを許可してください。');
+                }
+            }
+        });
+        
+        // カメラ起動の実際の処理
+        async function startCameraWithPermission() {
+            const constraints = {
+                video: {
+                    facingMode: 'environment', // 背面カメラを優先
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                }
+            };
+            
+            stream = await navigator.mediaDevices.getUserMedia(constraints);
+            video.srcObject = stream;
+            
+            // ビデオの準備ができたらボタンを有効化
+            video.onloadedmetadata = () => {
+                startCameraButton.disabled = true;
+                takePhotoButton.disabled = false;
+                video.style.display = 'block';
+                photo.style.display = 'none';
+            };
+        }
+
+        // 写真の撮影
+        takePhotoButton.addEventListener('click', () => {
+            // Canvasのサイズをビデオに合わせる
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            
+            // ビデオの現在のフレームをCanvasに描画
+            const context = canvas.getContext('2d');
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            // CanvasからデータURLを取得して画像に設定
+            const dataUrl = canvas.toDataURL('image/png');
+            photo.src = dataUrl;
+            
+            // UIの更新
+            video.style.display = 'none';
+            photo.style.display = 'block';
+            takePhotoButton.disabled = true;
+            countPillsButton.disabled = false;
+            retakeButton.disabled = false;
+        });
+        
+        // 錠剤を数える処理
+        countPillsButton.addEventListener('click', async () => {
+            processingOverlay.style.display = 'flex';
+            
+            // 少し遅延を入れて処理中の表示を確実に表示
+            setTimeout(() => {
+                try {
+                    // OpenCVのコンテキストで処理を実行
+                    const pillCount = countPillsWithOpenCV();
+                    countResult.textContent = `錠剤の数: ${pillCount}`;
+                } catch (err) {
+                    console.error('処理中にエラーが発生しました:', err);
+                    countResult.textContent = 'エラー: 錠剤の検出に失敗しました';
+                } finally {
+                    processingOverlay.style.display = 'none';
+                }
+            }, 100);
+        });
+        
+        // やり直し
+        retakeButton.addEventListener('click', () => {
+            if (stream) {
+                video.style.display = 'block';
+                photo.style.display = 'none';
+                takePhotoButton.disabled = false;
+                countPillsButton.disabled = true;
+                retakeButton.disabled = true;
+                countResult.textContent = '錠剤の数: -';
+                debugImage.style.display = 'none';
+            } else {
+                startCameraButton.disabled = false;
+            }
+        });
+        
+        // OpenCVを使った錠剤のカウント処理
+        function countPillsWithOpenCV() {
+            // 設定値を取得
+            const thresholdValue = parseInt(thresholdSlider.value);
+            const minArea = parseInt(minAreaSlider.value);
+            const maxArea = parseInt(maxAreaSlider.value);
+            
+            // 画像をOpenCVの形式に変換
+            const imgElement = photo;
+            const src = cv.imread(imgElement);
+            
+            // デバッグ用の出力画像
+            const dst = new cv.Mat();
+            const displayMat = src.clone();
+            
+            try {
+                // グレースケールに変換
+                const gray = new cv.Mat();
+                cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+                
+                // ガウシアンブラーでノイズを軽減
+                const blurred = new cv.Mat();
+                const ksize = new cv.Size(5, 5);
+                cv.GaussianBlur(gray, blurred, ksize, 0);
+                
+                // 二値化
+                const thresh = new cv.Mat();
+                cv.threshold(blurred, thresh, thresholdValue, 255, cv.THRESH_BINARY_INV);
+                
+                // モルフォロジー処理でノイズを除去
+                const kernel = cv.Mat.ones(3, 3, cv.CV_8U);
+                const morphed = new cv.Mat();
+                cv.morphologyEx(thresh, morphed, cv.MORPH_OPEN, kernel);
+                
+                // 輪郭を検出
+                const contours = new cv.MatVector();
+                const hierarchy = new cv.Mat();
+                cv.findContours(morphed, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+                
+                // 有効な輪郭をカウント
+                let validCount = 0;
+                
+                // 結果を表示用の画像に描画
+                for (let i = 0; i < contours.size(); ++i) {
+                    const contour = contours.get(i);
+                    const area = cv.contourArea(contour);
+                    
+                    if (area >= minArea && area <= maxArea) {
+                        validCount++;
+                        
+                        // 輪郭を赤色で描画
+                        const color = new cv.Scalar(255, 0, 0, 255);
+                        cv.drawContours(displayMat, contours, i, color, 2);
+                        
+                        // 輪郭の中心を計算
+                        const M = cv.moments(contour);
+                        if (M.m00 !== 0) {
+                            const cx = Math.round(M.m10 / M.m00);
+                            const cy = Math.round(M.m01 / M.m00);
+                            
+                            // 番号を描画
+                            cv.putText(
+                                displayMat,
+                                `${validCount}`,
+                                new cv.Point(cx, cy),
+                                cv.FONT_HERSHEY_SIMPLEX,
+                                0.5,
+                                new cv.Scalar(0, 255, 0, 255),
+                                2
+                            );
+                        }
+                    }
+                }
+                
+                // 結果をデバッグ画像に表示
+                cv.imshow('debugImage', displayMat);
+                debugImage.style.display = 'block';
+                
+                // メモリ解放
+                gray.delete();
+                blurred.delete();
+                thresh.delete();
+                kernel.delete();
+                morphed.delete();
+                contours.delete();
+                hierarchy.delete();
+                
+                return validCount;
+                
+            } catch (err) {
+                console.error('OpenCV処理エラー:', err);
+                throw err;
+            } finally {
+                // メモリ解放
+                src.delete();
+                dst.delete();
+                displayMat.delete();
+            }
+        }
+    </script>
+    
+    <script>
+        // OpenCVの読み込みチェック
+        window.onload = function() {
+            // OpenCVの読み込み状態確認
+            if (typeof cv !== 'undefined') {
+                onOpenCvReady();
+            }
+            
+            // iOSのSafariでOpenCVの読み込みがうまくいかない場合の対策
+            setTimeout(() => {
+                if (typeof cv === 'undefined') {
+                    // OpenCVが読み込めなかった場合、代替方法を提示
+                    const errorMessage = document.createElement('div');
+                    errorMessage.style.padding = '20px';
+                    errorMessage.style.backgroundColor = '#ffeeee';
+                    errorMessage.style.color = '#cc0000';
+                    errorMessage.style.borderRadius = '8px';
+                    errorMessage.style.margin = '20px auto';
+                    errorMessage.style.maxWidth = '500px';
+                    errorMessage.innerHTML = `
+                        <h3>OpenCVの読み込みに失敗しました</h3>
+                        <p>以下をお試しください：</p>
+                        <ul>
+                            <li>ページを再読み込みする</li>
+                            <li>Safari設定で「JavaScriptを有効にする」を確認する</li>
+                            <li>Safari設定でCookieとサイトデータを許可する</li>
+                        </ul>
+                    `;
+                    document.querySelector('.container').appendChild(errorMessage);
+                    document.getElementById('startCamera').textContent = 'OpenCVを再読み込み';
+                    document.getElementById('startCamera').disabled = false;
+                    document.getElementById('startCamera').onclick = () => {
+                        location.reload();
+                    };
+                }
+            }, 5000); // 5秒後にチェック
+        };
+    </script>
+</body>
+</html>
