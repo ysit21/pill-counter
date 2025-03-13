@@ -489,27 +489,27 @@
             const minArea = parseInt(minAreaSlider.value);
             const maxArea = parseInt(maxAreaSlider.value);
             
+            let src = null;
+            let dst = null;
+            let displayMat = null;
+            
             try {
-                // 専用の処理用canvasを作成
+                // 専用の処理用canvasを作成（既存のcanvasを再利用しない）
                 const processingCanvas = document.createElement('canvas');
                 processingCanvas.width = photo.naturalWidth || 640;
                 processingCanvas.height = photo.naturalHeight || 480;
-                processingCanvas.id = 'processingCanvas';
                 
                 // 画像をcanvasに描画
                 const ctx = processingCanvas.getContext('2d');
                 ctx.drawImage(photo, 0, 0, processingCanvas.width, processingCanvas.height);
                 
-                // 念のため、body に追加（デバッグ用、非表示）
-                processingCanvas.style.display = 'none';
-                document.body.appendChild(processingCanvas);
-                
-                // OpenCVの形式に変換
-                const src = cv.imread('processingCanvas');
+                // canvasからImageDataを取得してOpenCV Matに変換（cv.imreadを使わない）
+                const imageData = ctx.getImageData(0, 0, processingCanvas.width, processingCanvas.height);
+                src = cv.matFromImageData(imageData);
                 
                 // デバッグ用の出力画像
-                const dst = new cv.Mat();
-                const displayMat = src.clone();
+                dst = new cv.Mat();
+                displayMat = src.clone();
                 
                 // グレースケールに変換
                 const gray = new cv.Mat();
@@ -569,8 +569,14 @@
                     }
                 }
                 
-                // 結果をデバッグ画像に表示
-                cv.imshow('debugImage', displayMat);
+                // 結果をデバッグ画像に表示（canvasから直接変換）
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = displayMat.cols;
+                tempCanvas.height = displayMat.rows;
+                cv.imshow(tempCanvas, displayMat);
+                
+                // tempCanvasの内容をdebugImage(img要素)に転送
+                debugImage.src = tempCanvas.toDataURL();
                 debugImage.style.display = 'block';
                 
                 // メモリ解放
@@ -593,12 +599,6 @@
                 if (src) src.delete();
                 if (dst) dst.delete();
                 if (displayMat) displayMat.delete();
-                
-                // 処理用canvasを削除
-                const processingCanvas = document.getElementById('processingCanvas');
-                if (processingCanvas) {
-                    document.body.removeChild(processingCanvas);
-                }
             }
         }
         
