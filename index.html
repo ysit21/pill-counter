@@ -159,7 +159,6 @@
             bottom: 0;
             background-color: rgba(0, 0, 0, 0.7);
             z-index: 100;
-            display: flex;
             justify-content: center;
             align-items: center;
             flex-direction: column;
@@ -428,7 +427,7 @@
         });
         
         // 錠剤を数える処理
-        countPillsButton.addEventListener('click', async () => {
+        countPillsButton.addEventListener('click', () => {
             // OpenCVが利用可能か確認
             if (!cvLoaded) {
                 alert('OpenCVがまだ読み込まれていません。しばらく待つか、ページを再読み込みしてください。');
@@ -439,12 +438,6 @@
             if (!photo.complete || !photo.naturalWidth) {
                 alert('画像がまだ完全に読み込まれていません。少し待ってからもう一度お試しください。');
                 return;
-            }
-            
-            // キャンバスのサイズが適切かどうか確認
-            if (canvas.width <= 0 || canvas.height <= 0) {
-                canvas.width = photo.naturalWidth || 640;
-                canvas.height = photo.naturalHeight || 480;
             }
             
             processingOverlay.style.display = 'flex';
@@ -497,11 +490,22 @@
             const maxArea = parseInt(maxAreaSlider.value);
             
             try {
-                // 画像をOpenCVの形式に変換
-                // ここでキャンバスにまず画像を描画してからcv.imreadを使う
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(photo, 0, 0, canvas.width, canvas.height);
-                const src = cv.imread(canvas);
+                // 専用の処理用canvasを作成
+                const processingCanvas = document.createElement('canvas');
+                processingCanvas.width = photo.naturalWidth || 640;
+                processingCanvas.height = photo.naturalHeight || 480;
+                processingCanvas.id = 'processingCanvas';
+                
+                // 画像をcanvasに描画
+                const ctx = processingCanvas.getContext('2d');
+                ctx.drawImage(photo, 0, 0, processingCanvas.width, processingCanvas.height);
+                
+                // 念のため、body に追加（デバッグ用、非表示）
+                processingCanvas.style.display = 'none';
+                document.body.appendChild(processingCanvas);
+                
+                // OpenCVの形式に変換
+                const src = cv.imread('processingCanvas');
                 
                 // デバッグ用の出力画像
                 const dst = new cv.Mat();
@@ -586,9 +590,15 @@
                 return 0;
             } finally {
                 // メモリ解放
-                src.delete();
-                dst.delete();
-                displayMat.delete();
+                if (src) src.delete();
+                if (dst) dst.delete();
+                if (displayMat) displayMat.delete();
+                
+                // 処理用canvasを削除
+                const processingCanvas = document.getElementById('processingCanvas');
+                if (processingCanvas) {
+                    document.body.removeChild(processingCanvas);
+                }
             }
         }
         
