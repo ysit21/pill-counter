@@ -5,74 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy" content="default-src * 'self' 'unsafe-inline' 'unsafe-eval' data: blob: filesystem:">
     <title>錠剤カウンターアプリ</title>
-    <!-- OpenCV.jsを両方のCDNから読み込み、一方が失敗しても大丈夫なようにする -->
-    <script type="text/javascript">
-        // OpenCVのロード状態を管理
-        var cvLoaded = false;
-        
-        // OpenCVがロードされた時の処理
-        function onOpenCvReady() {
-            console.log('OpenCV.js is ready');
-            cvLoaded = true;
-            if (document.getElementById('startCamera')) {
-                document.getElementById('startCamera').disabled = false;
-            }
-            // ロード完了メッセージを表示
-            if (document.getElementById('opencv-loading-message')) {
-                document.getElementById('opencv-loading-message').textContent = 'OpenCV.jsの読み込みが完了しました！';
-                document.getElementById('opencv-loading-message').style.color = 'green';
-                setTimeout(function() {
-                    if (document.getElementById('opencv-loading-message')) {
-                        document.getElementById('opencv-loading-message').style.display = 'none';
-                    }
-                }, 3000);
-            }
-        }
-        
-        // フォールバック用のSJSから読み込む関数
-        function loadOpenCVFromSJS() {
-            if (!cvLoaded) {
-                console.log('CDNから読み込み失敗、代替ソースを試行します...');
-                var script = document.createElement('script');
-                script.setAttribute('async', '');
-                script.setAttribute('type', 'text/javascript');
-                script.addEventListener('load', onOpenCvReady);
-                script.addEventListener('error', function() {
-                    console.error('代替ソースからのOpenCV.jsの読み込みにも失敗しました');
-                });
-                script.src = 'https://docs.opencv.org/4.7.0/opencv.js';
-                var node = document.getElementsByTagName('script')[0];
-                node.parentNode.insertBefore(script, node);
-            }
-        }
-        
-        // windowのcvオブジェクト監視関数
-        function checkOpenCVLoaded() {
-            if (window.cv && !cvLoaded) {
-                onOpenCvReady();
-            }
-        }
-        
-        // OpenCVの読み込み状態を定期的にチェック
-        var cvCheckInterval = setInterval(function() {
-            checkOpenCVLoaded();
-            if (cvLoaded) {
-                clearInterval(cvCheckInterval);
-            }
-        }, 500);
-        
-        // タイムアウト処理
-        setTimeout(function() {
-            if (!cvLoaded) {
-                loadOpenCVFromSJS();
-            }
-        }, 5000);
-    </script>
-    
-    <!-- CDNからOpenCV.jsを読み込み -->
-    <script async src="https://cdnjs.cloudflare.com/ajax/libs/opencv.js/4.7.0/opencv.js" 
-            onload="onOpenCvReady()" 
-            onerror="loadOpenCVFromSJS()"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/opencv.js/4.7.0/opencv.js" integrity="sha512-RJGgr8UKvK/QZ2cJOQoN3l0vUKWmL+9vaTw3OiEUBpKTJwQgWQ0aKGVhNFXTP3vKRV4ZG2UJbqnLLbvxcGvMYg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -80,7 +13,6 @@
             padding: 0;
             background-color: #f5f5f7;
             color: #333;
-            overscroll-behavior: none; /* iOS上でのバウンス効果を防止 */
         }
         .container {
             max-width: 100%;
@@ -219,11 +151,6 @@
     <div class="container">
         <h1>錠剤カウンターアプリ</h1>
         
-        <!-- OpenCV読み込み状態メッセージ -->
-        <div id="opencv-loading-message" style="background-color: #f8f9fa; padding: 10px; border-radius: 5px; text-align: center; margin-bottom: 15px;">
-            OpenCV.jsを読み込み中です... しばらくお待ちください
-        </div>
-        
         <div class="camera-container">
             <video id="video" autoplay playsinline></video>
             <canvas id="canvas"></canvas>
@@ -266,6 +193,12 @@
     </div>
 
     <script>
+        // OpenCVが読み込まれるのを待つ
+        function onOpenCvReady() {
+            console.log('OpenCV.js is ready');
+            document.getElementById('startCamera').disabled = false;
+        }
+        
         // SafariでUserMediaをチェック
         function checkUserMediaSupport() {
             if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
@@ -275,6 +208,13 @@
             } else {
                 return false;
             }
+        }
+
+        // OpenCVの読み込みを監視
+        if (typeof cv !== 'undefined') {
+            onOpenCvReady();
+        } else {
+            document.addEventListener('opencv4javascriptready', onOpenCvReady);
         }
 
         // DOM要素
@@ -315,69 +255,89 @@
 
         // カメラの起動
         startCameraButton.addEventListener('click', async () => {
-            // OpenCVが読み込まれていない場合は、ページをリロード
-            if (!cvLoaded) {
-                location.reload();
-                return;
-            }
-            
             if (!checkUserMediaSupport()) {
                 alert('お使いのブラウザはカメラをサポートしていません。');
                 return;
             }
             
-            try {
-                // iOSのSafariとその他のブラウザでの共通のアプローチ
-                const constraints = {
-                    video: {
-                        facingMode: 'environment', // 背面カメラを優先
-                        width: { ideal: 1280 },
-                        height: { ideal: 720 }
-                    }
-                };
+            // iOSでのカメラアクセス問題に対処
+            if (navigator.userAgent.match(/iPhone|iPad|iPod/i)) {
+                // iOS Safariでは、getUserMediaはユーザーのインタラクションから直接呼び出す必要がある
+                // 簡易的なUIを表示
+                const permissionUI = document.createElement('div');
+                permissionUI.style.position = 'fixed';
+                permissionUI.style.top = '0';
+                permissionUI.style.left = '0';
+                permissionUI.style.width = '100%';
+                permissionUI.style.height = '100%';
+                permissionUI.style.backgroundColor = 'rgba(0,0,0,0.8)';
+                permissionUI.style.display = 'flex';
+                permissionUI.style.flexDirection = 'column';
+                permissionUI.style.justifyContent = 'center';
+                permissionUI.style.alignItems = 'center';
+                permissionUI.style.zIndex = '1000';
                 
-                // カメラへのアクセスを要求
-                stream = await navigator.mediaDevices.getUserMedia(constraints);
-                video.srcObject = stream;
+                const infoText = document.createElement('p');
+                infoText.textContent = 'カメラへのアクセスを許可してください';
+                infoText.style.color = 'white';
+                infoText.style.marginBottom = '20px';
+                infoText.style.textAlign = 'center';
+                infoText.style.padding = '0 20px';
                 
-                // ビデオの準備ができたらボタンを有効化
-                video.onloadedmetadata = () => {
-                    startCameraButton.disabled = true;
-                    takePhotoButton.disabled = false;
-                    video.style.display = 'block';
-                    photo.style.display = 'none';
-                };
+                const permissionButton = document.createElement('button');
+                permissionButton.textContent = 'カメラを許可する';
+                permissionButton.style.padding = '12px 24px';
+                permissionButton.style.backgroundColor = '#007aff';
+                permissionButton.style.color = 'white';
+                permissionButton.style.border = 'none';
+                permissionButton.style.borderRadius = '8px';
+                permissionButton.style.fontSize = '16px';
                 
-            } catch (err) {
-                console.error('カメラの起動に失敗しました:', err);
+                permissionUI.appendChild(infoText);
+                permissionUI.appendChild(permissionButton);
+                document.body.appendChild(permissionUI);
                 
-                // エラーメッセージをより詳細に
-                if (err.name === 'NotAllowedError') {
-                    alert('カメラへのアクセスが拒否されました。ブラウザの設定からカメラアクセスを許可してください。');
-                } else if (err.name === 'NotFoundError') {
-                    alert('カメラが見つかりませんでした。デバイスにカメラが接続されているか確認してください。');
-                } else if (err.name === 'NotReadableError') {
-                    alert('カメラにアクセスできませんでした。他のアプリがカメラを使用している可能性があります。');
-                } else if (err.name === 'OverconstrainedError') {
-                    alert('指定されたカメラ設定が利用できません。別の設定で再試行します。');
-                    // フォールバック: 制約を緩和して再試行
+                permissionButton.onclick = async () => {
                     try {
-                        stream = await navigator.mediaDevices.getUserMedia({ video: true });
-                        video.srcObject = stream;
-                        video.onloadedmetadata = () => {
-                            startCameraButton.disabled = true;
-                            takePhotoButton.disabled = false;
-                            video.style.display = 'block';
-                            photo.style.display = 'none';
-                        };
-                    } catch (fallbackErr) {
-                        alert('カメラアクセスに失敗しました。ブラウザを再起動するか、別のデバイスをお試しください。');
+                        document.body.removeChild(permissionUI);
+                        await startCameraWithPermission();
+                    } catch (err) {
+                        console.error('カメラの起動に失敗しました:', err);
+                        alert('カメラへのアクセスが拒否されました。設定でカメラへのアクセスを許可してください。');
                     }
-                } else {
-                    alert('カメラの起動中にエラーが発生しました: ' + err.message);
+                };
+            } else {
+                // iOS以外のデバイスでは通常の方法でカメラを起動
+                try {
+                    await startCameraWithPermission();
+                } catch (err) {
+                    console.error('カメラの起動に失敗しました:', err);
+                    alert('カメラへのアクセスが拒否されました。設定でカメラへのアクセスを許可してください。');
                 }
             }
         });
+        
+        // カメラ起動の実際の処理
+        async function startCameraWithPermission() {
+            const constraints = {
+                video: {
+                    facingMode: 'environment', // 背面カメラを優先
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                }
+            };
+            
+            stream = await navigator.mediaDevices.getUserMedia(constraints);
+            video.srcObject = stream;
+            
+            // ビデオの準備ができたらボタンを有効化
+            video.onloadedmetadata = () => {
+                startCameraButton.disabled = true;
+                takePhotoButton.disabled = false;
+                video.style.display = 'block';
+                photo.style.display = 'none';
+            };
+        }
 
         // 写真の撮影
         takePhotoButton.addEventListener('click', () => {
@@ -403,12 +363,6 @@
         
         // 錠剤を数える処理
         countPillsButton.addEventListener('click', async () => {
-            // OpenCVが利用可能か確認
-            if (!cvLoaded) {
-                alert('OpenCVがまだ読み込まれていません。しばらく待つか、ページを再読み込みしてください。');
-                return;
-            }
-            
             processingOverlay.style.display = 'flex';
             
             // 少し遅延を入れて処理中の表示を確実に表示
@@ -416,11 +370,7 @@
                 try {
                     // OpenCVのコンテキストで処理を実行
                     const pillCount = countPillsWithOpenCV();
-                    if (pillCount > 0) {
-                        countResult.textContent = `錠剤の数: ${pillCount}`;
-                    } else {
-                        countResult.textContent = '錠剤が検出できませんでした。パラメーターを調整してみてください。';
-                    }
+                    countResult.textContent = `錠剤の数: ${pillCount}`;
                 } catch (err) {
                     console.error('処理中にエラーが発生しました:', err);
                     countResult.textContent = 'エラー: 錠剤の検出に失敗しました';
@@ -445,101 +395,20 @@
             }
         });
         
-        // トラブルシューティングボタン
-        document.getElementById('debug').addEventListener('click', () => {
-            const debugInfo = {
-                browser: navigator.userAgent,
-                opencv: typeof cv !== 'undefined' ? 'ロード済み' : '未ロード',
-                camera: checkUserMediaSupport() ? 'サポート' : '未サポート',
-                screen: {
-                    width: window.innerWidth,
-                    height: window.innerHeight
-                },
-                secure: window.location.protocol === 'https:' ? 'はい' : 'いいえ'
-            };
-            
-            const debugModal = document.createElement('div');
-            debugModal.style.position = 'fixed';
-            debugModal.style.top = '0';
-            debugModal.style.left = '0';
-            debugModal.style.width = '100%';
-            debugModal.style.height = '100%';
-            debugModal.style.backgroundColor = 'rgba(0,0,0,0.9)';
-            debugModal.style.zIndex = '1100';
-            debugModal.style.display = 'flex';
-            debugModal.style.flexDirection = 'column';
-            debugModal.style.padding = '20px';
-            debugModal.style.boxSizing = 'border-box';
-            debugModal.style.overflowY = 'auto';
-            
-            const closeButton = document.createElement('button');
-            closeButton.textContent = '閉じる';
-            closeButton.style.alignSelf = 'flex-end';
-            closeButton.style.padding = '8px 16px';
-            closeButton.style.backgroundColor = '#dc3545';
-            closeButton.style.color = 'white';
-            closeButton.style.border = 'none';
-            closeButton.style.borderRadius = '4px';
-            closeButton.style.marginBottom = '20px';
-            
-            const infoContainer = document.createElement('div');
-            infoContainer.style.color = 'white';
-            infoContainer.style.backgroundColor = '#333';
-            infoContainer.style.padding = '15px';
-            infoContainer.style.borderRadius = '8px';
-            infoContainer.style.fontSize = '14px';
-            infoContainer.style.fontFamily = 'monospace';
-            infoContainer.style.whiteSpace = 'pre-wrap';
-            infoContainer.style.overflow = 'auto';
-            
-            const debugText = `===== デバッグ情報 =====
-ブラウザ: ${debugInfo.browser}
-OpenCV: ${debugInfo.opencv}
-カメラサポート: ${debugInfo.camera}
-画面サイズ: ${debugInfo.screen.width}x${debugInfo.screen.height}
-セキュア接続: ${debugInfo.secure}
-
-===== トラブルシューティング =====
-1. ブラウザーの設定でカメラとJavaScriptが許可されていることを確認してください
-2. 別のブラウザ（Chrome、Firefoxなど）で試してみてください
-3. デバイスを再起動してみてください
-4. 静的な画像を使用したい場合は、写真を撮影せずに「錠剤を数える」ボタンを押してみてください
-
-===== カメラがアクセスできない場合 =====
-iOSの設定 > Safari > カメラ で「許可」に設定されていることを確認してください
-`;
-            infoContainer.textContent = debugText;
-            
-            closeButton.addEventListener('click', () => {
-                document.body.removeChild(debugModal);
-            });
-            
-            debugModal.appendChild(closeButton);
-            debugModal.appendChild(infoContainer);
-            document.body.appendChild(debugModal);
-        });
-        
         // OpenCVを使った錠剤のカウント処理
         function countPillsWithOpenCV() {
-            // OpenCVが読み込まれていない場合は処理しない
-            if (typeof cv === 'undefined' || !cvLoaded) {
-                alert('OpenCVが読み込まれていません。ページを再読み込みしてください。');
-                return 0;
-            }
-            
             // 設定値を取得
             const thresholdValue = parseInt(thresholdSlider.value);
             const minArea = parseInt(minAreaSlider.value);
             const maxArea = parseInt(maxAreaSlider.value);
             
-            try {
-                // 画像をOpenCVの形式に変換
-                const imgElement = photo;
-                const src = cv.imread(imgElement);
-                
-                // デバッグ用の出力画像
-                const dst = new cv.Mat();
-                const displayMat = src.clone();
+            // 画像をOpenCVの形式に変換
+            const imgElement = photo;
+            const src = cv.imread(imgElement);
+            
+            // デバッグ用の出力画像
+            const dst = new cv.Mat();
+            const displayMat = src.clone();
             
             try {
                 // グレースケールに変換
@@ -617,26 +486,27 @@ iOSの設定 > Safari > カメラ で「許可」に設定されていること�
                 
             } catch (err) {
                 console.error('OpenCV処理エラー:', err);
-                alert('画像処理中にエラーが発生しました: ' + err.message);
-                return 0;
+                throw err;
             } finally {
                 // メモリ解放
-                if (src) src.delete();
-                if (dst) dst.delete();
-                if (displayMat) displayMat.delete();
+                src.delete();
+                dst.delete();
+                displayMat.delete();
             }
         }
     </script>
     
     <script>
-        // ページ読み込み時の処理
+        // OpenCVの読み込みチェック
         window.onload = function() {
-            // 初期状態ではカメラボタンを無効にしておく
-            document.getElementById('startCamera').disabled = true;
+            // OpenCVの読み込み状態確認
+            if (typeof cv !== 'undefined') {
+                onOpenCvReady();
+            }
             
-            // 10秒後にもまだOpenCVが読み込まれていない場合
+            // iOSのSafariでOpenCVの読み込みがうまくいかない場合の対策
             setTimeout(() => {
-                if (!cvLoaded) {
+                if (typeof cv === 'undefined') {
                     // OpenCVが読み込めなかった場合、代替方法を提示
                     const errorMessage = document.createElement('div');
                     errorMessage.style.padding = '20px';
@@ -652,25 +522,16 @@ iOSの設定 > Safari > カメラ で「許可」に設定されていること�
                             <li>ページを再読み込みする</li>
                             <li>Safari設定で「JavaScriptを有効にする」を確認する</li>
                             <li>Safari設定でCookieとサイトデータを許可する</li>
-                            <li>インターネット接続を確認する</li>
                         </ul>
                     `;
                     document.querySelector('.container').appendChild(errorMessage);
-                    document.getElementById('opencv-loading-message').textContent = 'OpenCVの読み込みに失敗しました';
-                    document.getElementById('opencv-loading-message').style.color = 'red';
-                    document.getElementById('startCamera').textContent = 'ページを再読み込み';
+                    document.getElementById('startCamera').textContent = 'OpenCVを再読み込み';
                     document.getElementById('startCamera').disabled = false;
                     document.getElementById('startCamera').onclick = () => {
                         location.reload();
                     };
                 }
-            }, 10000); // 10秒後にチェック
-            
-            // すでにOpenCVが読み込まれている場合
-            if (typeof cv !== 'undefined') {
-                cvLoaded = true;
-                onOpenCvReady();
-            }
+            }, 5000); // 5秒後にチェック
         };
     </script>
 </body>
