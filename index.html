@@ -5,7 +5,74 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy" content="default-src * 'self' 'unsafe-inline' 'unsafe-eval' data: blob: filesystem:">
     <title>錠剤カウンターアプリ</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/opencv.js/4.7.0/opencv.js" integrity="sha512-RJGgr8UKvK/QZ2cJOQoN3l0vUKWmL+9vaTw3OiEUBpKTJwQgWQ0aKGVhNFXTP3vKRV4ZG2UJbqnLLbvxcGvMYg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <!-- OpenCV.jsを両方のCDNから読み込み、一方が失敗しても大丈夫なようにする -->
+    <script type="text/javascript">
+        // OpenCVのロード状態を管理
+        var cvLoaded = false;
+        
+        // OpenCVがロードされた時の処理
+        function onOpenCvReady() {
+            console.log('OpenCV.js is ready');
+            cvLoaded = true;
+            if (document.getElementById('startCamera')) {
+                document.getElementById('startCamera').disabled = false;
+            }
+            // ロード完了メッセージを表示
+            if (document.getElementById('opencv-loading-message')) {
+                document.getElementById('opencv-loading-message').textContent = 'OpenCV.jsの読み込みが完了しました！';
+                document.getElementById('opencv-loading-message').style.color = 'green';
+                setTimeout(function() {
+                    if (document.getElementById('opencv-loading-message')) {
+                        document.getElementById('opencv-loading-message').style.display = 'none';
+                    }
+                }, 3000);
+            }
+        }
+        
+        // フォールバック用のSJSから読み込む関数
+        function loadOpenCVFromSJS() {
+            if (!cvLoaded) {
+                console.log('CDNから読み込み失敗、代替ソースを試行します...');
+                var script = document.createElement('script');
+                script.setAttribute('async', '');
+                script.setAttribute('type', 'text/javascript');
+                script.addEventListener('load', onOpenCvReady);
+                script.addEventListener('error', function() {
+                    console.error('代替ソースからのOpenCV.jsの読み込みにも失敗しました');
+                });
+                script.src = 'https://docs.opencv.org/4.7.0/opencv.js';
+                var node = document.getElementsByTagName('script')[0];
+                node.parentNode.insertBefore(script, node);
+            }
+        }
+        
+        // windowのcvオブジェクト監視関数
+        function checkOpenCVLoaded() {
+            if (window.cv && !cvLoaded) {
+                onOpenCvReady();
+            }
+        }
+        
+        // OpenCVの読み込み状態を定期的にチェック
+        var cvCheckInterval = setInterval(function() {
+            checkOpenCVLoaded();
+            if (cvLoaded) {
+                clearInterval(cvCheckInterval);
+            }
+        }, 500);
+        
+        // タイムアウト処理
+        setTimeout(function() {
+            if (!cvLoaded) {
+                loadOpenCVFromSJS();
+            }
+        }, 5000);
+    </script>
+    
+    <!-- CDNからOpenCV.jsを読み込み -->
+    <script async src="https://cdnjs.cloudflare.com/ajax/libs/opencv.js/4.7.0/opencv.js" 
+            onload="onOpenCvReady()" 
+            onerror="loadOpenCVFromSJS()"></script>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -13,6 +80,7 @@
             padding: 0;
             background-color: #f5f5f7;
             color: #333;
+            overscroll-behavior: none; /* iOS上でのバウンス効果を防止 */
         }
         .container {
             max-width: 100%;
@@ -151,6 +219,11 @@
     <div class="container">
         <h1>錠剤カウンターアプリ</h1>
         
+        <!-- OpenCV読み込み状態メッセージ -->
+        <div id="opencv-loading-message" style="background-color: #f8f9fa; padding: 10px; border-radius: 5px; text-align: center; margin-bottom: 15px;">
+            OpenCV.jsを読み込み中です... しばらくお待ちください
+        </div>
+        
         <div class="camera-container">
             <video id="video" autoplay playsinline></video>
             <canvas id="canvas"></canvas>
@@ -193,12 +266,6 @@
     </div>
 
     <script>
-        // OpenCVが読み込まれるのを待つ
-        function onOpenCvReady() {
-            console.log('OpenCV.js is ready');
-            document.getElementById('startCamera').disabled = false;
-        }
-        
         // SafariでUserMediaをチェック
         function checkUserMediaSupport() {
             if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
@@ -208,13 +275,6 @@
             } else {
                 return false;
             }
-        }
-
-        // OpenCVの読み込みを監視
-        if (typeof cv !== 'undefined') {
-            onOpenCvReady();
-        } else {
-            document.addEventListener('opencv4javascriptready', onOpenCvReady);
         }
 
         // DOM要素
@@ -363,6 +423,12 @@
         
         // 錠剤を数える処理
         countPillsButton.addEventListener('click', async () => {
+            // OpenCVが利用可能か確認
+            if (!cvLoaded) {
+                alert('OpenCVがまだ読み込まれていません。しばらく待つか、ページを再読み込みしてください。');
+                return;
+            }
+            
             processingOverlay.style.display = 'flex';
             
             // 少し遅延を入れて処理中の表示を確実に表示
@@ -370,7 +436,11 @@
                 try {
                     // OpenCVのコンテキストで処理を実行
                     const pillCount = countPillsWithOpenCV();
-                    countResult.textContent = `錠剤の数: ${pillCount}`;
+                    if (pillCount > 0) {
+                        countResult.textContent = `錠剤の数: ${pillCount}`;
+                    } else {
+                        countResult.textContent = '錠剤が検出できませんでした。パラメーターを調整してみてください。';
+                    }
                 } catch (err) {
                     console.error('処理中にエラーが発生しました:', err);
                     countResult.textContent = 'エラー: 錠剤の検出に失敗しました';
@@ -397,20 +467,26 @@
         
         // OpenCVを使った錠剤のカウント処理
         function countPillsWithOpenCV() {
+            // OpenCVが読み込まれていない場合は処理しない
+            if (typeof cv === 'undefined' || !cvLoaded) {
+                alert('OpenCVが読み込まれていません。ページを再読み込みしてください。');
+                return 0;
+            }
+            
             // 設定値を取得
             const thresholdValue = parseInt(thresholdSlider.value);
             const minArea = parseInt(minAreaSlider.value);
             const maxArea = parseInt(maxAreaSlider.value);
             
-            // 画像をOpenCVの形式に変換
-            const imgElement = photo;
-            const src = cv.imread(imgElement);
-            
-            // デバッグ用の出力画像
-            const dst = new cv.Mat();
-            const displayMat = src.clone();
-            
             try {
+                // 画像をOpenCVの形式に変換
+                const imgElement = photo;
+                const src = cv.imread(imgElement);
+                
+                // デバッグ用の出力画像
+                const dst = new cv.Mat();
+                const displayMat = src.clone();
+                
                 // グレースケールに変換
                 const gray = new cv.Mat();
                 cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
@@ -486,7 +562,8 @@
                 
             } catch (err) {
                 console.error('OpenCV処理エラー:', err);
-                throw err;
+                alert('画像処理中にエラーが発生しました: ' + err.message);
+                return 0;
             } finally {
                 // メモリ解放
                 src.delete();
@@ -494,19 +571,15 @@
                 displayMat.delete();
             }
         }
-    </script>
-    
-    <script>
-        // OpenCVの読み込みチェック
+        
+        // ページ読み込み時の処理
         window.onload = function() {
-            // OpenCVの読み込み状態確認
-            if (typeof cv !== 'undefined') {
-                onOpenCvReady();
-            }
+            // 初期状態ではカメラボタンを無効にしておく
+            document.getElementById('startCamera').disabled = true;
             
-            // iOSのSafariでOpenCVの読み込みがうまくいかない場合の対策
+            // 10秒後にもまだOpenCVが読み込まれていない場合
             setTimeout(() => {
-                if (typeof cv === 'undefined') {
+                if (!cvLoaded) {
                     // OpenCVが読み込めなかった場合、代替方法を提示
                     const errorMessage = document.createElement('div');
                     errorMessage.style.padding = '20px';
@@ -522,16 +595,25 @@
                             <li>ページを再読み込みする</li>
                             <li>Safari設定で「JavaScriptを有効にする」を確認する</li>
                             <li>Safari設定でCookieとサイトデータを許可する</li>
+                            <li>インターネット接続を確認する</li>
                         </ul>
                     `;
                     document.querySelector('.container').appendChild(errorMessage);
-                    document.getElementById('startCamera').textContent = 'OpenCVを再読み込み';
+                    document.getElementById('opencv-loading-message').textContent = 'OpenCVの読み込みに失敗しました';
+                    document.getElementById('opencv-loading-message').style.color = 'red';
+                    document.getElementById('startCamera').textContent = 'ページを再読み込み';
                     document.getElementById('startCamera').disabled = false;
                     document.getElementById('startCamera').onclick = () => {
                         location.reload();
                     };
                 }
-            }, 5000); // 5秒後にチェック
+            }, 10000); // 10秒後にチェック
+            
+            // すでにOpenCVが読み込まれている場合
+            if (typeof cv !== 'undefined') {
+                cvLoaded = true;
+                onOpenCvReady();
+            }
         };
     </script>
 </body>
